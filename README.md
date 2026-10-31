@@ -16,7 +16,7 @@ All analyses were performed using R and Quarto.
 
 ## Data Availability
 
-Publicly available single-cell RNA-seq data were obtained from: https://cells.ucsc.edu/ms
+Publicly available single-nuclei RNA-seq data were obtained from: https://cells.ucsc.edu/ms
 
 These data were previously published in "Neuronal vulnerability and multilineage diversity in multiple sclerosis" (Schirmer et al.), Nature, 2019,  doi: 10.1038/s41586-019-1404-z
 
