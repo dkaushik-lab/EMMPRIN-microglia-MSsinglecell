@@ -18,6 +18,8 @@ All analyses were performed using R and Quarto.
 
 Publicly available single-cell RNA-seq data were obtained from: https://cells.ucsc.edu/ms
 
+These data were previously published in "Neuronal vulnerability and multilineage diversity in multiple sclerosis" (Schirmer et al.), Nature, 2019,  doi: 10.1038/s41586-019-1404-z
+
 ## Running the Analyses
 
 This repository contains all code used to generate the analyses and figures presented in the manuscript.The analyses are provided as a Quarto workflow (EMMPRIN-microglia-MSsinglecell.qmd). The workflow automatically creates the necessary local directory structure for downloaded data, intermediate files, and generated outputs. 
