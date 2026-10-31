@@ -8,7 +8,7 @@ This repository contains the analysis code used in the study:
 
 This study investigates the role of EMMPRIN/BSG in microglia in the context of multiple sclerosis (MS) by leveraging mouse models (experimental autoimmune encephalomyelitis) and human tissues.
 
-This repository contains workflows for analysis of public single-cell transcriptome data from healthy controls and individuals with MS.
+This repository contains workflows for analysis of public single-nuclei transcriptome data from healthy controls and individuals with MS.
 
 All analyses were performed using R and Quarto.
 
