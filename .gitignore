@@ -1,0 +1,18 @@
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Rprofile
+
+# macOS
+.DS_Store
+
+# renv
+renv/
+renv.lock
+
+# Large files
+data/
+results/
+scripts/

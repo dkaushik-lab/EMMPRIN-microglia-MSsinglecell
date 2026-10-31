@@ -1,0 +1,571 @@
+---
+title: "EMMPRIN-microglia-MSsinglecell"
+---
+
+# Setup
+
+## Load packages
+```{r}
+# Define packages to load
+pkgs <- c(
+  "Seurat", 
+  "SeuratObject", 
+  "dplyr", 
+  "tidyr", 
+  "Matrix", 
+  "ggplot2", 
+  "ggpubr",
+  "remotes", 
+  "here", 
+  "renv", 
+  "patchwork", 
+  "gridExtra",
+  "rstudioapi", 
+  "ggeffects", 
+  "DHARMa", 
+  "fields",
+  "GEOquery", 
+  "org.Hs.eg.db", 
+  "AnnotationDbi",
+  "msigdbr", 
+  "clusterProfiler", 
+  "lme4",
+  "lmerTest", 
+  "emmeans"
+)
+
+#Load packages (will return TRUE if loaded and FALSE if failed)
+sapply(pkgs,
+  function(x) suppressWarnings(
+    suppressPackageStartupMessages(
+      require(x, character.only = TRUE)
+    )
+  )
+)
+```
+
+## Set seed to improve reproducibility
+
+```{r}
+set.seed(123)
+```
+
+## Create file structure
+
+```{r}
+dirs <- c(
+  "data/raw",
+  "data/processed",
+  "results/objects",
+  "results/figures"
+)
+
+lapply(
+  dirs,
+  \(d) dir.create(here(d),
+                  recursive = TRUE,
+                  showWarnings = FALSE)
+)
+```
+
+# Load data and create Seurat object (use Terminal!)
+
+## Download files/unzip
+
+```{r}
+#Takes ~5-10min to load data
+system(
+  paste(
+    "curl -L",
+    "https://cells.ucsc.edu/ms/rawMatrix.zip",
+    "-o",
+    shQuote(here("data", "raw", "rawMatrix.zip"))
+  )
+)
+
+unzip(
+  here("data", "raw", "rawMatrix.zip"),
+  exdir = here("data", "raw")
+)
+
+list.files(
+  here("data", "raw"),
+  recursive = TRUE
+)
+```
+
+## Create 10X object
+
+```{r}
+mat <- readMM(here("data", "raw", "matrix.mtx"))
+dim(mat)
+```
+
+```{r}
+total_counts <- Matrix::colSums(mat)
+
+summary(total_counts)
+hist(total_counts, breaks = 100, main = "UMI per barcode")
+```
+
+```{r}
+data <- Read10X(data.dir = here("data", "raw", "rawMatrix"))
+data1 <- CreateSeuratObject(counts = data, project = "MS3k", min.cells = 3, min.features = 200) #filter out low expressing cells and genes
+```
+
+## add metadata
+
+```{r}
+# define metadata and add $cell and $sample slots
+metadata <- read.delim(file = here("data", "raw", "rawMatrix", "meta.txt"))
+rownames(metadata) <- metadata$cell
+data1@meta.data$sample <- gsub("^[ACGT]+-[0-9]+_", "", rownames(data1@meta.data))
+
+# check that sample and cell ids match in data and metadata
+unique(data1@meta.data$sample)
+unique(metadata$sample)
+unique(metadata$diagnosis)
+all(rownames(data1@meta.data) == metadata$cell) #likely FALSE because some cells were filtered out
+
+# add metadata to object
+data1 <- AddMetaData(data1, metadata = metadata)
+```
+
+# Exploratory analysis and QC
+
+## Mitochondrial gene expression and distribution
+
+```{r}
+data1[["percent.mt"]] <- PercentageFeatureSet(data1, pattern = "^MT-")
+
+VlnPlot(
+  data1,
+  features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+  ncol = 3 
+)
+```
+
+# Dimensionality reduction
+
+## Filter/normalize data
+
+```{r}
+data1 <- subset(data1, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+data1 <- NormalizeData(data1, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+## Define variable genes
+
+```{r}
+data1 <- FindVariableFeatures(data1, selection.method = "vst", nfeatures = 2000) #most variable genes to be used in creating UMAP plots
+plot1 <- VariableFeaturePlot(data1)
+plot1
+
+#plot top variable genes
+top10 <- head(VariableFeatures(data1), 10)
+LabelPoints(plot = plot1, points = top10, repel = TRUE)
+```
+
+## Scale data and run PCA
+
+```{r}
+all.genes <- rownames(data1)
+data1<- ScaleData(data1, features = all.genes)
+data1 <- RunPCA(data1, features = VariableFeatures(object = data1), npcs = 30)
+ElbowPlot(data1) #appears that 1:10 dims is appropriate for our analysis
+```
+
+## Cluster cells and dimensionality reduction
+
+```{r}
+data1<- FindNeighbors(data1, dims = 1:10)
+data1 <- FindClusters(data1, resolution = 0.5) #for purpose of our analysis 0.5 okay
+data1 <- RunUMAP(data1, dims = 1:10)
+```
+
+## Visualize clusters
+
+```{r}
+DP_clus_all <- DimPlot(data1, reduction = "umap")
+
+DP_grp_disease <- DimPlot(data1, reduction = "umap", group.by = "diagnosis", cols = c("Control" = "steelblue", "MS" = "firebrick"), pt.size = 0.5)  + theme_classic() + theme(plot.title = element_text(hjust = 0.5, face = "bold"), plot.subtitle = element_text(hjust = 0.5))
+
+DP_splt_disease <- DimPlot(data1, reduction = "umap", split.by = "diagnosis")
+
+DP_grp_individual <- DimPlot(data1, reduction = "umap", group.by = "sample")
+
+DP_clus_all
+DP_grp_disease
+DP_splt_disease
+DP_grp_individual
+```
+## Change color of clusters for publication
+
+```{r}
+cluster_cols <- c(
+  "0"  = "#0072B2",  
+  "1"  = "#E69F00",  
+  "2"  = "#009E73",  
+  "3"  = "#6A3D9A",  
+  "4"  = "#D55E00",  
+  "5"  = "#56B4E9",  
+  "6"  = "#B79F00",  
+  "7"  = "#1B9E77", 
+  "8"  = "#FF1493",  # ★ Deep pink - HIGHLIGHT
+  "9"  = "#8C564B", 
+  "10" = "#17BECF",  
+  "11" = "#9467BD",  
+  "12" = "#BCBD22",  
+  "13" = "#E377C2", 
+  "14" = "#4D4D4D",  
+  "15" = "#F58231"  
+)
+
+DP_splt_disease_new <- DimPlot(data1, reduction = "umap", split.by = "diagnosis", group.by = "seurat_clusters", cols = cluster_cols)
+DP_splt_disease_new
+
+DP_splt_disease_lab <- DimPlot(data1, reduction = "umap", split.by = "diagnosis", label = TRUE, repel = TRUE, group.by = "seurat_clusters", cols = cluster_cols)
+DP_splt_disease_lab
+```
+
+## Save/load clustered object (all cells)
+
+```{r}
+saveRDS(data1, file = here("results", "objects", "Schirmer_Seurat"))
+data1 <- readRDS(here("results", "objects", "Schirmer_Seurat"))
+```
+
+# Define microglia (Mg) population
+
+## Mg markers
+
+```{r}
+FP_P2RY12 <- FeaturePlot(data1, features = "P2RY12")
+FP_CSF1R <- FeaturePlot(data1, features = "CSF1R")
+FP_CX3CR1 <- FeaturePlot(data1, features = "CX3CR1")
+FP_TMEM119 <- FeaturePlot(data1, features = "TMEM119")
+
+FP_P2RY12
+FP_CSF1R
+FP_CX3CR1
+FP_TMEM119
+```
+
+```{r}
+DP_Mg_markers <- 
+  
+  DotPlot(
+  data1, 
+  features = c("P2RY12","CSF1R", "CX3CR1", "TMEM119"),
+  cols = c("lightgrey", "blue")   
+)
+
+DP_Mg_markers
+
+# Appear to be predominately expressed in Cluster 8
+```
+
+## Subset Seurat object (Mg cells only)
+
+```{r}
+Cluster8 <- subset(data1, idents = 8)
+```
+
+```{r}
+table(unique(Cluster8@meta.data[, c("stage", "cell")])$stage)
+#note: fewer cells in control population
+```
+
+## Save/load Mg cluster
+
+```{r}
+saveRDS(Cluster8, file = here("results", "objects", "Schirmer_Seurat_Clus8"))
+Cluster8 <- readRDS(here("results", "objects", "Schirmer_Seurat_Clus8"))
+```
+
+# Glycolytic markers in Mg
+
+## Boxplot of TREM2 and BSG (EMMPRIN) expression
+
+```{r}
+df <- FetchData(
+  object = Cluster8,
+  vars = c("TREM2", "BSG", "diagnosis", "sample")
+)
+
+df_avg <- df %>%
+  pivot_longer(cols = c("TREM2", "BSG"),
+               names_to = "Gene",
+               values_to = "Expression") %>%
+  group_by(sample, diagnosis, Gene) %>%
+  summarize(Expression = mean(Expression), .groups = "drop")
+
+BP_BSG_TREM2_diagnosis_Mg <- ggplot(
+  df_avg, aes(x = diagnosis, y = Expression, fill = diagnosis)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+  geom_jitter(
+    width = 0.15,
+    size = 2,
+    alpha = 0.8
+  ) +
+  facet_wrap(~ Gene, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "red", "MS" = "blue")) +
+  labs(
+    title = "Average TREM2 & BSG Expression per Individual (Cluster 8)",
+    x = "Condition",
+    y = "Average Expression"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    strip.text = element_text(face = "bold")
+  )
+
+# Adding p-values
+pvals <- df_avg %>%
+  group_by(Gene) %>%
+  summarize(
+    p_value = wilcox.test(Expression ~ diagnosis)$p.value
+  )
+pvals
+
+BP_BSG_TREM2_diagnosis_Mg_pval <- ggplot(df_avg, aes(x = diagnosis, y = Expression, fill = diagnosis)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+  geom_jitter(width = 0.15, size = 2, alpha = 0.8) +
+  facet_wrap(~ Gene, scales = "free_y") +
+  scale_fill_manual(values = c("Control" = "red", "MS" = "blue")) +
+  stat_compare_means(
+    method = "wilcox.test",
+    label = "p.format", 
+    label.y.npc = 0.8
+  ) +
+  labs(
+    title = "Average Gene Expression per Individual (Cluster 8)",
+    x = "Condition",
+    y = "Average Expression"
+  ) +
+  # scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+  theme_classic()
+
+BP_BSG_TREM2_diagnosis_Mg
+BP_BSG_TREM2_diagnosis_Mg_pval
+```
+
+# Correlation analysis (BSG ~ glycolysis)
+
+## Load Hallmark gene set
+
+```{r}
+gly_hall_genes <- msigdbr(
+  species = "Homo sapiens",
+  category = "H"
+) |>
+  dplyr::filter(gs_name == "HALLMARK_GLYCOLYSIS") |>
+  dplyr::pull(gene_symbol) |>
+  unique()
+length(gly_hall_genes)#should be 200 genes long
+```
+
+## Add Hallmark score to single cells
+
+```{r}
+Cluster8 <- AddModuleScore(
+  Cluster8,
+  features = list(intersect(gly_hall_genes, rownames(Cluster8))),
+  name = "gly_hall"
+)
+```
+
+## Mixed effects model
+
+```{r}
+df_cor <- data.frame(
+  BSG = FetchData(Cluster8, "BSG")[,1],
+  glycolysis = Cluster8$gly_hall1,
+  individual = Cluster8$sample,
+  stage = Cluster8$stage
+)
+
+#center BSG expression (allows model to be more interpretible and stable)
+df_cor$BSG_c <- scale(df_cor$BSG, center = TRUE, scale = FALSE)
+
+#need to change to factor so that I can reorder with Control as my reference
+df_cor$stage <- factor(df_cor$stage) 
+df_cor$stage <- relevel(df_cor$stage, ref = "Control")
+
+#Test model: We want to know the correlation between BSG and glycolysis while controlling for the random effects of each individual
+#Adding random slope as well (suggesting BSG~glycolysis response varies per individual)
+model_mixed <- lmer(glycolysis ~ BSG_c * stage + (1 | individual), data = df_cor) 
+summary(model_mixed)
+```
+
+## Plot correlation results
+
+```{r}
+# Get marginal predictions
+pred_stage <- ggpredict(
+  model_mixed,
+  terms = c("BSG_c", "stage")
+)
+
+# Plot
+Corr_simple_all <- ggplot(pred_stage,
+       aes(x = x, y = predicted,
+           color = group, fill = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              alpha = 0.15, color = NA) +
+  labs(
+    x = "Centered BSG expression",
+    y = "Glycolysis score",
+    color = "Stage",
+    fill = "Stage"
+  ) +
+  theme_classic(base_size = 13)
+
+Corr_simple_all
+```
+
+## Generate stats
+
+```{r}
+#Pull Beta/slope and p-value information
+slopes <- emtrends(
+  model_mixed,
+  specs = "stage",
+  var = "BSG_c"
+)
+
+slopes_df <- as.data.frame(
+  summary(slopes, infer = c(TRUE, TRUE))
+)
+
+colnames(slopes_df)
+
+# Create annotation labels
+slopes_df$label <- sprintf(
+  "Slope = %.3f, 95%% CI [%.3f, %.3f], p-value = %.3f",
+  slopes_df$BSG_c.trend,
+  slopes_df$lower.CL,
+  slopes_df$upper.CL,
+  slopes_df$p.value
+)
+
+# Extract y-position for each stage at max x
+y_pos <- pred_stage %>%
+  group_by(group) %>%
+  filter(x == max(x)) %>%
+  summarise(y = predicted, .groups = "drop")
+
+# Join y-positions to slopes
+slopes_df <- left_join(
+  slopes_df,
+  y_pos,
+  by = c("stage" = "group")
+)
+
+# Add annotations to plot
+corr_simple_all_labelled <- Corr_simple_all +
+  geom_text(
+    data = slopes_df,
+    aes(
+      x = max(pred_stage$x) * 0.9,
+      y = y,
+      label = label,
+      color = stage
+    ),
+    inherit.aes = FALSE,
+    hjust = 1,
+    vjust = -0.5,
+    size = 4
+  )
+corr_simple_all_labelled
+```
+# Save figures
+
+## Veiw all figures
+
+```{r}
+DP_clus_all
+DP_grp_disease
+DP_splt_disease
+DP_splt_disease_new
+
+FP_P2RY12
+FP_CSF1R
+FP_CX3CR1
+FP_TMEM119
+
+DP_Mg_markers
+
+BP_BSG_TREM2_diagnosis_Mg
+BP_BSG_TREM2_diagnosis_Mg_pval
+
+Corr_simple_all
+```
+
+## Function for saving figures
+
+```{r}
+save_figures <- function(
+  plots,
+  figure_save_path,
+  current_date,
+  sizes = NULL,
+  default_size = c(6, 5),
+  units = "in",
+  dpi = 600,
+  ext = "jpg",
+  envir = parent.frame()
+) {
+
+  dir.create(figure_save_path, showWarnings = FALSE, recursive = TRUE)
+
+  for (plot_name in plots) {
+
+    # Get plot object by name
+    plot_obj <- get(plot_name, envir = envir)
+
+    # determine size
+    if (!is.null(sizes) && plot_name %in% names(sizes)) {
+      width  <- sizes[[plot_name]][1]
+      height <- sizes[[plot_name]][2]
+    } else {
+      width  <- default_size[1]
+      height <- default_size[2]
+    }
+
+    ggsave(
+      filename = file.path(
+        figure_save_path,
+        paste0(current_date, "_", plot_name, ".", ext)
+      ),
+      plot = plot_obj,
+      width = width,
+      height = height,
+      units = units,
+      dpi = dpi
+    )
+  }
+}
+```
+
+## Save all figures of interest
+
+```{r}
+# list of figures to save
+plots_to_save <- c("DP_clus_all", "DP_grp_disease", "DP_splt_disease", "DP_splt_disease_new", "FP_P2RY12", "FP_CSF1R", "FP_CX3CR1", "FP_TMEM119", "DP_Mg_markers", "BP_BSG_TREM2_diagnosis_Mg", "BP_BSG_TREM2_diagnosis_Mg_pval", "Corr_simple_all", "Corr_individual_all", "Corr_individual_facet", "corr_simple_all_labelled")
+
+# specify size here if needs to be different than default
+plot_sizes <- list(
+  corr_simple_all_labelled   = c(8, 5)
+)
+
+#save figures (specify filepath)
+save_figures(plots_to_save, plot_sizes, figure_save_path = here("results", "figures"), current_date = format(Sys.Date(), "%Y%m%d"))
+```
+
+```{r}
+renv::install("Seurat@5.0.0")
+```
+
