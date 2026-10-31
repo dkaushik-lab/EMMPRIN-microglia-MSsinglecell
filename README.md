@@ -20,13 +20,7 @@ Publicly available single-cell RNA-seq data were obtained from: https://cells.uc
 
 ## Running the Analyses
 
-This repository contains all code used to generate the analyses and figures presented in the manuscript.The analyses are provided as Quarto workflows.
-
-```text
-EMMPRIN-microglia-MSsinglecell.qmd
-```
-
-The workflows automatically create the necessary local directory structure for downloaded data, intermediate files, and generated outputs. 
+This repository contains all code used to generate the analyses and figures presented in the manuscript.The analyses are provided as a Quarto workflow (EMMPRIN-microglia-MSsinglecell.qmd). The workflow automatically creates the necessary local directory structure for downloaded data, intermediate files, and generated outputs. 
 
 To reproduce the results:
 
